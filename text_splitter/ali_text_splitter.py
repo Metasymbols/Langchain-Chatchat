@@ -1,34 +1,66 @@
 from langchain.text_splitter import CharacterTextSplitter
 import re
 from typing import List
+try:
+    from modelscope.pipelines import pipeline
+except ImportError as e:
+    raise ImportError(
+        "Could not import modelscope python package. "
+        "Please install modelscope with `pip install modelscope`. "
+    ) from e
 
 
 class AliTextSplitter(CharacterTextSplitter):
-    def __init__(self, pdf: bool = False, **kwargs):
+    """
+    AliTextSplitter 类，继承自 CharacterTextSplitter，用于文本的分割。
+    支持根据是否是PDF格式的文本，以及是否使用达摩院的语义分割模型来进行不同的文本分割。
+
+    参数:
+    - pdf: bool, 默认为 False。如果为 True，则表示输入的文本是 PDF 格式，需要进行特定的预处理。
+    - model: str, 默认为 'damo/nlp_bert_document-segmentation_chinese-base'。达摩院语义分割模型的名称。
+    - device: str, 默认为 'cpu'。指定模型运行的设备。
+    - **kwargs: 传递给父类 CharacterTextSplitter 的额外关键字参数。
+    """
+
+    def __init__(self, pdf: bool = False, model='damo/nlp_bert_document-segmentation_chinese-base', 
+                 device='cpu', **kwargs):
         super().__init__(**kwargs)
         self.pdf = pdf
+        self.model = model
+        self.device = device
+
+    def preprocess_pdf_text(self, text: str) -> str:
+        """对PDF文本进行预处理，减少换行符和空格"""
+        pattern = re.compile(r"\n{3,}|^\s+$", re.MULTILINE)
+        return pattern.sub("\n", text).strip()
+
+    def segment_text(self, text: str) -> List[str]:
+        """使用达摩院的语义分割模型进行文档分割"""
+        try:
+            p = pipeline(
+                task="document-segmentation",
+                model=self.model,
+                device=self.device
+            )
+            result = p(documents=text)
+            return [i for i in result["text"].split("\n\t") if i]
+        except Exception as e:
+            raise RuntimeError(
+                "Failed to segment text with the specified model. "
+                "Please check your model scope setup and internet connection."
+            ) from e
 
     def split_text(self, text: str) -> List[str]:
-        # use_document_segmentation参数指定是否用语义切分文档，此处采取的文档语义分割模型为达摩院开源的nlp_bert_document-segmentation_chinese-base，论文见https://arxiv.org/abs/2107.09278
-        # 如果使用模型进行文档语义切分，那么需要安装modelscope[nlp]：pip install "modelscope[nlp]" -f https://modelscope.oss-cn-beijing.aliyuncs.com/releases/repo.html
-        # 考虑到使用了三个模型，可能对于低配置gpu不太友好，因此这里将模型load进cpu计算，有需要的话可以替换device为自己的显卡id
+        """
+        分割给定的文本字符串 into a list of sentences or document segments.
+
+        参数:
+        - text: str, 需要分割的文本。
+
+        返回值:
+        - List[str], 分割后的文本片段列表。
+        """
         if self.pdf:
-            text = re.sub(r"\n{3,}", r"\n", text)
-            text = re.sub('\s', " ", text)
-            text = re.sub("\n\n", "", text)
-        try:
-            from modelscope.pipelines import pipeline
-        except ImportError:
-            raise ImportError(
-                "Could not import modelscope python package. "
-                "Please install modelscope with `pip install modelscope`. "
-            )
-
-
-        p = pipeline(
-            task="document-segmentation",
-            model='damo/nlp_bert_document-segmentation_chinese-base',
-            device="cpu")
-        result = p(documents=text)
-        sent_list = [i for i in result["text"].split("\n\t") if i]
-        return sent_list
+            text = self.preprocess_pdf_text(text)
+        
+        return self.segment_text(text)

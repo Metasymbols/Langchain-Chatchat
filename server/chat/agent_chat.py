@@ -20,10 +20,22 @@ from server.agent import model_container
 from server.agent.custom_template import CustomOutputParser, CustomPromptTemplate
 
 
+""" 
+ * 与代理进行聊天的异步函数。
+ * 
+ * @param query 用户输入的问题或对话内容。
+ * @param history 过去的对话历史，用于上下文理解。
+ * @param stream 是否以流式方式返回响应。
+ * @param model_name 使用的LLM（大语言模型）的名称。
+ * @param temperature LLM采样时的温度，影响生成结果的多样性。
+ * @param max_tokens 限制LLM生成的token数量，None表示使用模型的最大值。
+ * @param prompt_name 使用的prompt模板名称。
+ * @return 返回一个异步可迭代的响应，如果是流式交互，则实时返回对话过程中的信息。
+ """
 async def agent_chat(query: str = Body(..., description="用户输入", examples=["恼羞成怒"]),
                      history: List[History] = Body([],
                                                    description="历史对话",
-                                                   examples=[[
+                                                   examples=[[  # 示例对话
                                                        {"role": "user", "content": "请使用知识库工具查询今天北京天气"},
                                                        {"role": "assistant",
                                                         "content": "使用天气查询工具查询到今天北京多云，10-14摄氏度，东北风2级，易感冒"}]]
@@ -37,6 +49,15 @@ async def agent_chat(query: str = Body(..., description="用户输入", examples
                      ):
     history = [History.from_data(h) for h in history]
 
+    """ *
+     * 用于异步迭代生成聊天响应的内部函数。
+     * 
+     * @param query 用户输入的问题或对话内容。
+     * @param history 过去的对话历史，用于上下文理解。
+     * @param model_name 使用的LLM（大语言模型）的名称。
+     * @param prompt_name 使用的prompt模板名称。
+     * @return 返回一个异步可迭代的响应，包含对话过程中的信息。
+     * """
     async def agent_chat_iterator(
             query: str,
             history: Optional[List[History]],
@@ -48,6 +69,7 @@ async def agent_chat(query: str = Body(..., description="用户输入", examples
         if isinstance(max_tokens, int) and max_tokens <= 0:
             max_tokens = None
 
+        # 设置模型和回调
         model = get_ChatOpenAI(
             model_name=model_name,
             temperature=temperature,
@@ -55,10 +77,10 @@ async def agent_chat(query: str = Body(..., description="用户输入", examples
             callbacks=[callback],
         )
 
-        kb_list = {x["kb_name"]: x for x in get_kb_details()}
-        model_container.DATABASE = {name: details['kb_info'] for name, details in kb_list.items()}
+        kb_list = {x["kb_name"]: x for x in get_kb_details()}  # 获取知识库列表
+        model_container.DATABASE = {name: details['kb_info'] for name, details in kb_list.items()}  # 更新模型容器中的数据库
 
-        if Agent_MODEL:
+        if Agent_MODEL:  # 如果配置了代理模型
             model_agent = get_ChatOpenAI(
                 model_name=Agent_MODEL,
                 temperature=temperature,
@@ -69,6 +91,7 @@ async def agent_chat(query: str = Body(..., description="用户输入", examples
         else:
             model_container.MODEL = model
 
+        # 设置prompt模板和输出解析器
         prompt_template = get_prompt_template("agent_chat", prompt_name)
         prompt_template_agent = CustomPromptTemplate(
             template=prompt_template,
@@ -76,13 +99,19 @@ async def agent_chat(query: str = Body(..., description="用户输入", examples
             input_variables=["input", "intermediate_steps", "history"]
         )
         output_parser = CustomOutputParser()
+        
+        # 设置对话记忆和LLM链
         llm_chain = LLMChain(llm=model, prompt=prompt_template_agent)
         memory = ConversationBufferWindowMemory(k=HISTORY_LEN * 2)
+        
+        # 加载历史对话到记忆中
         for message in history:
             if message.role == 'user':
                 memory.chat_memory.add_user_message(message.content)
             else:
                 memory.chat_memory.add_ai_message(message.content)
+
+        # 根据模型名称初始化对话执行器
         if "chatglm3" in model_container.MODEL.model_name or "zhipu-api" in model_container.MODEL.model_name:
             agent_executor = initialize_glm3_agent(
                 llm=model,
@@ -105,6 +134,8 @@ async def agent_chat(query: str = Body(..., description="用户输入", examples
                                                                 verbose=True,
                                                                 memory=memory,
                                                                 )
+        
+        # 循环以处理对话
         while True:
             try:
                 task = asyncio.create_task(wrap_done(
@@ -114,10 +145,11 @@ async def agent_chat(query: str = Body(..., description="用户输入", examples
             except:
                 pass
 
+        # 如果是流式交互，则异步迭代并返回响应
         if stream:
             async for chunk in callback.aiter():
                 tools_use = []
-                # Use server-sent-events to stream the response
+                # 解析并根据状态生成相应的聊天信息
                 data = json.loads(chunk)
                 if data["status"] == Status.start or data["status"] == Status.complete:
                     continue
@@ -143,7 +175,7 @@ async def agent_chat(query: str = Body(..., description="用户输入", examples
                     yield json.dumps({"answer": data["llm_token"]}, ensure_ascii=False)
 
 
-        else:
+        else:  # 非流式交互，等待整个对话完成
             answer = ""
             final_answer = ""
             async for chunk in callback.aiter():

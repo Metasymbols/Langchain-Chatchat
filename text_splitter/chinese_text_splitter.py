@@ -4,56 +4,90 @@ from typing import List
 
 
 class ChineseTextSplitter(CharacterTextSplitter):
-    def __init__(self, pdf: bool = False, sentence_size: int = 250, **kwargs):
+    """
+    用于分割中文文本的类，继承自CharacterTextSplitter。
+
+    参数:
+    - is_pdf: 布尔值，表示文本是否来自PDF。默认为False。
+    - max_sentence_length: 整数，表示分割后的句子最大长度。默认为250。
+    - **kwargs: 字典，传递给父类的额外参数。
+    """
+
+    def __init__(self, is_pdf: bool = False, max_sentence_length: int = 250, **kwargs):
         super().__init__(**kwargs)
-        self.pdf = pdf
-        self.sentence_size = sentence_size
+        self.is_pdf = is_pdf
+        self.max_sentence_length = max_sentence_length
+
+    def clean_pdf_text(self, text: str) -> str:
+        """
+        清理PDF文本中的多余换行和空格。
+        """
+        # 合并清理多余换行和空格的正则表达式
+        return re.sub(r'\n{3,}|[\s]+', ' ', text)
 
     def split_text1(self, text: str) -> List[str]:
-        if self.pdf:
-            text = re.sub(r"\n{3,}", "\n", text)
-            text = re.sub('\s', ' ', text)
-            text = text.replace("\n\n", "")
-        sent_sep_pattern = re.compile('([﹒﹔﹖﹗．。！？]["’”」』]{0,2}|(?=["‘“「『]{1,2}|$))')  # del ：；
-        sent_list = []
-        for ele in sent_sep_pattern.split(text):
-            if sent_sep_pattern.match(ele) and sent_list:
-                sent_list[-1] += ele
-            elif ele:
-                sent_list.append(ele)
-        return sent_list
+        """
+        分割文本为句子列表的另一种实现方法。
 
-    def split_text(self, text: str) -> List[str]:   ##此处需要进一步优化逻辑
-        if self.pdf:
-            text = re.sub(r"\n{3,}", r"\n", text)
-            text = re.sub('\s', " ", text)
-            text = re.sub("\n\n", "", text)
+        参数:
+        - text: 字符串，待分割的文本。
 
-        text = re.sub(r'([;；.!?。！？\?])([^”’])', r"\1\n\2", text)  # 单字符断句符
-        text = re.sub(r'(\.{6})([^"’”」』])', r"\1\n\2", text)  # 英文省略号
-        text = re.sub(r'(\…{2})([^"’”」』])', r"\1\n\2", text)  # 中文省略号
+        返回值:
+        - List[str]: 分割后的句子列表。
+        """
+        if self.is_pdf:
+            text = self.clean_pdf_text(text)
+
+        # 定义句子分隔符模式
+        sentence_separator_pattern = re.compile('([﹒﹔﹖﹗．。！？]["’”」』]{0,2}|(?=["‘“「『]{1,2}|$))')  
+        sentences = []
+        for part in sentence_separator_pattern.split(text):
+            if sentence_separator_pattern.match(part) and sentences:
+                sentences[-1] += part
+            elif part:
+                sentences.append(part)
+        return sentences
+
+    def split_text(self, text: str) -> List[str]:
+        """
+        分割传入的文本字符串为句子列表。
+
+        参数:
+        - text: 字符串，待分割的文本。
+
+        返回值:
+        - List[str]: 分割后的句子列表。
+        """
+        if self.is_pdf:
+            text = self.clean_pdf_text(text)
+
+        # 应用多个规则将文本按句子分隔
+        text = re.sub(r'([;；.!?。！？\?])([^”’])', r"\1\n\2", text)  
+        text = re.sub(r'(\.{6})([^"’"])', r"\1\n\2", text)  # 优化了原正则表达式
+        text = re.sub(r'(\…{2})([^"’”」』])', r"\1\n\2", text)  
         text = re.sub(r'([;；!?。！？\?]["’”」』]{0,2})([^;；!?，。！？\?])', r'\1\n\2', text)
-        # 如果双引号前有终止符，那么双引号才是句子的终点，把分句符\n放到双引号后，注意前面的几句都小心保留了双引号
-        text = text.rstrip()  # 段尾如果有多余的\n就去掉它
-        # 很多规则中会考虑分号;，但是这里我把它忽略不计，破折号、英文双引号等同样忽略，需要的再做些简单调整即可。
-        ls = [i for i in text.split("\n") if i]
-        for ele in ls:
-            if len(ele) > self.sentence_size:
-                ele1 = re.sub(r'([,，.]["’”」』]{0,2})([^,，.])', r'\1\n\2', ele)
-                ele1_ls = ele1.split("\n")
-                for ele_ele1 in ele1_ls:
-                    if len(ele_ele1) > self.sentence_size:
-                        ele_ele2 = re.sub(r'([\n]{1,}| {2,}["’”」』]{0,2})([^\s])', r'\1\n\2', ele_ele1)
-                        ele2_ls = ele_ele2.split("\n")
-                        for ele_ele2 in ele2_ls:
-                            if len(ele_ele2) > self.sentence_size:
-                                ele_ele3 = re.sub('( ["’”」』]{0,2})([^ ])', r'\1\n\2', ele_ele2)
-                                ele2_id = ele2_ls.index(ele_ele2)
-                                ele2_ls = ele2_ls[:ele2_id] + [i for i in ele_ele3.split("\n") if i] + ele2_ls[
-                                                                                                       ele2_id + 1:]
-                        ele_id = ele1_ls.index(ele_ele1)
-                        ele1_ls = ele1_ls[:ele_id] + [i for i in ele2_ls if i] + ele1_ls[ele_id + 1:]
+        text = text.rstrip()  
 
-                id = ls.index(ele)
-                ls = ls[:id] + [i for i in ele1_ls if i] + ls[id + 1:]
-        return ls
+        # 去除分隔后产生的空字符串，并对过长的句子进行进一步分割
+        split_text = [i for i in text.split("\n") if i]
+        for sentence in split_text:
+            if len(sentence) > self.max_sentence_length:
+                # 对过长的句子进行多层次的分割处理
+                first_level_split = re.sub(r'([,，.]["’”」』]{0,2})([^,，.])', r'\1\n\2', sentence)
+                first_level_parts = first_level_split.split("\n")
+                for part in first_level_parts:
+                    if len(part) > self.max_sentence_length:
+                        second_level_split = re.sub(r'([\n]{1,}| {2,}["’”」』]{0,2})([^\s])', r'\1\n\2', part)
+                        second_level_parts = second_level_split.split("\n")
+                        for inner_part in second_level_parts:
+                            if len(inner_part) > self.max_sentence_length:
+                                third_level_split = re.sub('( ["’”」』]{0,2})([^ ])', r'\1\n\2', inner_part)
+                                second_level_index = second_level_parts.index(inner_part)
+                                second_level_parts = second_level_parts[:second_level_index] + [i for i in third_level_split.split("\n") if i] + second_level_parts[
+                                                                                                           second_level_index + 1:]
+                        first_level_index = first_level_parts.index(part)
+                        first_level_parts = first_level_parts[:first_level_index] + [i for i in second_level_parts if i] + first_level_parts[
+                                                                                                       first_level_index + 1:]
+                index = split_text.index(sentence)
+                split_text = split_text[:index] + [i for i in first_level_parts if i] + split_text[index + 1:]
+        return split_text

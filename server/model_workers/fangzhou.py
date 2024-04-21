@@ -8,24 +8,42 @@ from configs import logger, log_verbose
 
 class FangZhouWorker(ApiModelWorker):
     """
-    火山方舟
+    火山方舟模型工作者类，用于与火山方舟API进行交互。
     """
 
-    def __init__(
-            self,
-            *,
-            model_names: List[str] = ["fangzhou-api"],
-            controller_addr: str = None,
-            worker_addr: str = None,
-            version: Literal["chatglm-6b-model"] = "chatglm-6b-model",
-            **kwargs,
-    ):
+    def __init__(self,
+                 *,
+                 model_names: List[str] = ["fangzhou-api"],  # 模型名称列表
+                 controller_addr: str = None,  # 控制器地址
+                 worker_addr: str = None,  # 工作者地址
+                 version: Literal["chatglm-6b-model"] = "chatglm-6b-model",  # 模型版本
+                 **kwargs,
+                 ):
+        """
+        初始化FangZhouWorker。
+
+        参数:
+        - model_names: 模型名称列表，默认为["fangzhou-api"]。
+        - controller_addr: 控制器地址，默认为None。
+        - worker_addr: 工作者地址，默认为None。
+        - version: 模型版本，默认为"chatglm-6b-model"。
+        - **kwargs: 其他关键字参数。
+        """
         kwargs.update(model_names=model_names, controller_addr=controller_addr, worker_addr=worker_addr)
         kwargs.setdefault("context_len", 16384)
         super().__init__(**kwargs)
         self.version = version
 
     def do_chat(self, params: ApiChatParams) -> Dict:
+        """
+        与火山方舟API进行聊天交互。
+
+        参数:
+        - params: ApiChatParams对象，包含聊天所需的配置参数。
+
+        返回:
+        - 与API交互的响应结果，为字典格式。
+        """
         from volcengine.maas import MaasService
 
         params.load_config(self.model_names[0])
@@ -33,7 +51,7 @@ class FangZhouWorker(ApiModelWorker):
         maas.set_ak(params.api_key)
         maas.set_sk(params.secret_key)
 
-        # document: "https://www.volcengine.com/docs/82379/1099475"
+        # 准备与火山方舟API交互的请求数据
         req = {
             "model": {
                 "name": params.version,
@@ -52,6 +70,7 @@ class FangZhouWorker(ApiModelWorker):
         for resp in maas.stream_chat(req):
             if error := resp.error:
                 if error.code_n > 0:
+                    # 处理API请求错误
                     data = {
                         "error_code": error.code_n,
                         "text": error.message,
@@ -68,6 +87,7 @@ class FangZhouWorker(ApiModelWorker):
                     text += chunk
                     yield {"error_code": 0, "text": text}
             else:
+                # 处理未知错误
                 data = {
                     "error_code": 500,
                     "text": f"请求方舟 API 时发生未知的错误: {resp}"
@@ -77,10 +97,30 @@ class FangZhouWorker(ApiModelWorker):
                 break
 
     def get_embeddings(self, params):
+        """
+        获取嵌入表示。
+
+        参数:
+        - params: 参数对象，具体取决于模型需求。
+
+        说明:
+        该方法目前仅打印信息，具体实现需根据需求完善。
+        """
         print("embedding")
         print(params)
 
     def make_conv_template(self, conv_template: str = None, model_path: str = None) -> Conversation:
+        """
+        创建对话模板。
+
+        参数:
+        - conv_template: 对话模板字符串，默认为None。
+        - model_path: 模型路径字符串，默认为None。
+
+        返回:
+        - 初始化后的Conversation对象。
+        """
+        # 返回默认的对话模板
         return conv.Conversation(
             name=self.model_names[0],
             system_message="你是一个聪明、对人类有帮助的人工智能，你可以对人类提出的问题给出有用、详细、礼貌的回答。",

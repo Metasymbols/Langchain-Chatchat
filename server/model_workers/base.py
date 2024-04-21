@@ -1,36 +1,27 @@
-from fastchat.conversation import Conversation
-from configs import LOG_PATH, TEMPERATURE
-import fastchat.constants
-fastchat.constants.LOGDIR = LOG_PATH
-from fastchat.serve.base_model_worker import BaseModelWorker
-import uuid
-import json
-import sys
-from pydantic import BaseModel, root_validator
-import fastchat
-import asyncio
-from server.utils import get_model_worker_config
-from typing import Dict, List, Optional
-
-
-__all__ = ["ApiModelWorker", "ApiChatParams", "ApiCompletionParams", "ApiEmbeddingsParams"]
-
-
+# ApiConfigParams 类
 class ApiConfigParams(BaseModel):
     '''
     在线API配置参数，未提供的值会自动从model_config.ONLINE_LLM_MODEL中读取
     '''
+    # API的基本URL
     api_base_url: Optional[str] = None
+    # API代理
     api_proxy: Optional[str] = None
+    # API键
     api_key: Optional[str] = None
+    # 密钥
     secret_key: Optional[str] = None
-    group_id: Optional[str] = None # for minimax
-    is_pro: bool = False # for minimax
-
-    APPID: Optional[str] = None # for xinghuo
-    APISecret: Optional[str] = None # for xinghuo
-    is_v2: bool = False # for xinghuo
-
+    # minimax用的组ID
+    group_id: Optional[str] = None
+    # minimax用的是否为pro版本
+    is_pro: bool = False
+    # xinghuo用的APPID
+    APPID: Optional[str] = None
+    # xinghuo用的APISecret
+    APISecret: Optional[str] = None
+    # xinghuo用的版本是否为v2
+    is_v2: bool = False
+    # 工作器名称
     worker_name: Optional[str] = None
 
     class Config:
@@ -38,6 +29,7 @@ class ApiConfigParams(BaseModel):
 
     @root_validator(pre=True)
     def validate_config(cls, v: Dict) -> Dict:
+        # 根据worker_name从配置中加载参数
         if config := get_model_worker_config(v.get("worker_name")):
             for n in cls.__fields__:
                 if n in config:
@@ -45,6 +37,7 @@ class ApiConfigParams(BaseModel):
         return v
 
     def load_config(self, worker_name: str):
+        # 根据worker_name加载配置
         self.worker_name = worker_name
         if config := get_model_worker_config(worker_name):
             for n in self.__fields__:
@@ -53,42 +46,62 @@ class ApiConfigParams(BaseModel):
         return self
 
 
+# ApiModelParams 类
 class ApiModelParams(ApiConfigParams):
     '''
     模型配置参数
     '''
+    # 模型版本
     version: Optional[str] = None
+    # 模型版本URL
     version_url: Optional[str] = None
-    api_version: Optional[str] = None # for azure
-    deployment_name: Optional[str] = None # for azure
-    resource_name: Optional[str] = None # for azure
-
+    # API版本（用于azure）
+    api_version: Optional[str] = None
+    # 部署名称（用于azure）
+    deployment_name: Optional[str] = None
+    # 资源名称（用于azure）
+    resource_name: Optional[str] = None
+    # 生成回复的随机性控制
     temperature: float = TEMPERATURE
+    # 最大生成token数
     max_tokens: Optional[int] = None
+    # 顶部p值
     top_p: Optional[float] = 1.0
 
 
+# ApiChatParams 类
 class ApiChatParams(ApiModelParams):
     '''
     chat请求参数
     '''
+    # 消息列表
     messages: List[Dict[str, str]]
-    system_message: Optional[str] = None # for minimax
-    role_meta: Dict = {} # for minimax
+    # 系统消息（用于minimax）
+    system_message: Optional[str] = None
+    # 角色元数据（用于minimax）
+    role_meta: Dict = {}
 
 
+# ApiCompletionParams 类
 class ApiCompletionParams(ApiModelParams):
+    # 提示文本
     prompt: str
 
 
+# ApiEmbeddingsParams 类
 class ApiEmbeddingsParams(ApiConfigParams):
+    # 文本列表
     texts: List[str]
+    # 嵌入模型名称
     embed_model: Optional[str] = None
-    to_query: bool = False # for minimax
+    # 是否查询（用于minimax）
+    to_query: bool = False
 
 
+# ApiModelWorker 类
 class ApiModelWorker(BaseModelWorker):
-    DEFAULT_EMBED_MODEL: str = None # None means not support embedding
+    # 默认嵌入模型
+    DEFAULT_EMBED_MODEL: str = None
 
     def __init__(
         self,
@@ -99,13 +112,14 @@ class ApiModelWorker(BaseModelWorker):
         no_register: bool = False,
         **kwargs,
     ):
+        # 初始化BaseModelWorker并设置相关参数
         kwargs.setdefault("worker_id", uuid.uuid4().hex[:8])
         kwargs.setdefault("model_path", "")
         kwargs.setdefault("limit_worker_concurrency", 5)
         super().__init__(model_names=model_names,
-                        controller_addr=controller_addr,
-                        worker_addr=worker_addr,
-                        **kwargs)
+                         controller_addr=controller_addr,
+                         worker_addr=worker_addr,
+                         **kwargs)
         import fastchat.serve.base_model_worker
         import sys
         self.logger = fastchat.serve.base_model_worker.logger
@@ -125,10 +139,12 @@ class ApiModelWorker(BaseModelWorker):
 
 
     def count_token(self, params):
+        # 计算提示文本的token数
         prompt = params["prompt"]
         return {"count": len(str(prompt)), "error_code": 0}
 
     def generate_stream_gate(self, params: Dict):
+        # 生成流式gate
         self.call_ct += 1
 
         try:
@@ -136,7 +152,7 @@ class ApiModelWorker(BaseModelWorker):
             if self._is_chat(prompt):
                 messages = self.prompt_to_messages(prompt)
                 messages = self.validate_messages(messages)
-            else: # 使用chat模仿续写功能，不支持历史消息
+            else:  # 使用chat模仿续写功能，不支持历史消息
                 messages = [{"role": self.user_role, "content": f"please continue writing from here: {prompt}"}]
 
             p = ApiChatParams(
@@ -152,13 +168,13 @@ class ApiModelWorker(BaseModelWorker):
             yield self._jsonify({"error_code": 500, "text": f"{self.model_names[0]}请求API时发生错误：{e}"})
 
     def generate_gate(self, params):
+        # 生成gate
         try:
             for x in self.generate_stream_gate(params):
                 ...
             return json.loads(x[:-1].decode())
         except Exception as e:
             return {"error_code": 500, "text": str(e)}
-
 
     # 需要用户自定义的方法
 
@@ -220,7 +236,7 @@ class ApiModelWorker(BaseModelWorker):
         检查prompt是否由chat messages拼接而来
         TODO: 存在误判的可能，也许从fastchat直接传入原始messages是更好的做法
         '''
-        key = f"{self.conv.sep}{self.user_role}:"
+        key = f"{self.conv.sep}{self.user_role}:"  # 检查用户角色的标记
         return key in prompt
 
     def prompt_to_messages(self, prompt: str) -> List[Dict]:

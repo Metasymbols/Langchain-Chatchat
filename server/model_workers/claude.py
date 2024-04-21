@@ -9,6 +9,18 @@ import uvicorn
 
 
 class ClaudeWorker(ApiModelWorker):
+    """
+    ClaudeWorker 类：负责与Claude API进行交互的模型工作者。
+
+    参数:
+    - controller_addr: str, 控制器地址，默认为None。
+    - worker_addr: str, 工作者地址，默认为None。
+    - model_names: List[str], 模型名称列表，默认为["claude-api"]。
+    - version: str, 使用的API版本，默认为"2023-06-01"。
+
+    属性:
+    - version: str, API版本。
+    """
     def __init__(
             self,
             *,
@@ -25,6 +37,15 @@ class ClaudeWorker(ApiModelWorker):
         self.version = version 
 
     def create_claude_messages(self, params: ApiChatParams) -> json:
+        """
+        根据输入参数创建Claude API所需的消息格式。
+
+        参数:
+        - params: ApiChatParams, 包含聊天所需参数的对象。
+
+        返回:
+        - json, 用于发送给Claude API的消息JSON对象。
+        """
         has_history = any(msg['role'] == 'assistant' for msg in params.messages)
         claude_msg = {
             "model": params.model_name,
@@ -37,7 +58,7 @@ class ClaudeWorker(ApiModelWorker):
             content = msg['content']
             if role == 'system':
                 continue
-            # Adjusting for history presence
+            # 根据是否有历史消息调整角色名称
             if has_history and role == 'assistant':
                 role = "model"
             claude_msg["messages"].append({"role": role, "content": content})
@@ -45,6 +66,15 @@ class ClaudeWorker(ApiModelWorker):
         return claude_msg
 
     def do_chat(self, params: ApiChatParams) -> Dict:
+        """
+        与Claude API进行对话。
+
+        参数:
+        - params: ApiChatParams, 包含聊天所需参数的对象。
+
+        返回:
+        - Dict, 包含与Claude API交互的结果。
+        """
         data = self.create_claude_messages(params)
         url = "https://api.anthropic.com/v1/messages"
         headers = {
@@ -77,7 +107,7 @@ class ClaudeWorker(ApiModelWorker):
                     delta_text = event_data.get("delta", {}).get("text", "")
                     text += delta_text
                 elif event_type == "message_stop":
-                    # Message is complete, yield the result
+                    # 消息接收完成，返回结果
                     yield {
                         "error_code": 0,
                         "text": text
@@ -95,11 +125,26 @@ class ClaudeWorker(ApiModelWorker):
                 print("Invalid JSON string:", json_string)
 
     def get_embeddings(self, params):
-        # Implement embedding retrieval if necessary
+        """
+        获取嵌入向量（若需要）。
+
+        参数:
+        - params: 参数对象，用于获取嵌入向量所需的全部或部分参数。
+        """
         print("embedding")
         print(params)
 
     def make_conv_template(self, conv_template: List[Dict[str, str]] = None, model_path: str = None) -> Conversation:
+        """
+        创建对话模板。
+
+        参数:
+        - conv_template: List[Dict[str, str]], 对话模板，默认为None。
+        - model_path: str, 模型路径，默认为None。
+
+        返回:
+        - Conversation, 创建的对话对象。
+        """
         if conv_template is None:
             conv_template = [
                 {"role": "user", "content": "Hello there."},
