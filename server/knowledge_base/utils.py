@@ -23,6 +23,15 @@ import chardet
 
 
 def validate_kb_name(knowledge_base_id: str) -> bool:
+    """
+    验证知识库ID的有效性。
+    
+    参数:
+    - knowledge_base_id: 知识库的ID，类型为字符串。
+    
+    返回值:
+    - 返回True表示知识库ID有效，不包含任何意外字符或路径攻击关键字；返回False表示知识库ID无效。
+    """
     # 检查是否包含预期外的字符或路径攻击关键字
     if "../" in knowledge_base_id:
         return False
@@ -30,31 +39,93 @@ def validate_kb_name(knowledge_base_id: str) -> bool:
 
 
 def get_kb_path(knowledge_base_name: str):
+    """
+    获取知识库的根路径。
+    
+    参数:
+    - knowledge_base_name: 知识库的名称，类型为字符串。
+    
+    返回值:
+    - 返回知识库的完整路径。
+    """
     return os.path.join(KB_ROOT_PATH, knowledge_base_name)
 
 
 def get_doc_path(knowledge_base_name: str):
+    """
+    获取知识库文档的路径。
+    
+    参数:
+    - knowledge_base_name: 知识库的名称，类型为字符串。
+    
+    返回值:
+    - 返回知识库文档目录的完整路径。
+    """
     return os.path.join(get_kb_path(knowledge_base_name), "content")
 
 
 def get_vs_path(knowledge_base_name: str, vector_name: str):
+    """
+    获取知识库向量存储的路径。
+    
+    参数:
+    - knowledge_base_name: 知识库的名称，类型为字符串。
+    - vector_name: 向量的名称，类型为字符串。
+    
+    返回值:
+    - 返回知识库指定向量存储的完整路径。
+    """
     return os.path.join(get_kb_path(knowledge_base_name), "vector_store", vector_name)
 
 
 def get_file_path(knowledge_base_name: str, doc_name: str):
+    """
+    获取知识库中文档的文件路径。
+    
+    参数:
+    - knowledge_base_name: 知识库的名称，类型为字符串。
+    - doc_name: 文档的名称，类型为字符串。
+    
+    返回值:
+    - 返回知识库中指定文档的完整文件路径。
+    """
     return os.path.join(get_doc_path(knowledge_base_name), doc_name)
 
 
 def list_kbs_from_folder():
+    """
+    列出KB根目录下的所有知识库。
+    
+    返回值:
+    - 返回一个列表，包含KB根目录下所有以目录形式存在的知识库名称。
+    """
     return [f for f in os.listdir(KB_ROOT_PATH)
             if os.path.isdir(os.path.join(KB_ROOT_PATH, f))]
 
 
 def list_files_from_folder(kb_name: str):
+    """
+    列出指定知识库目录下的所有文件。
+    
+    参数:
+    - kb_name: 知识库的名称，类型为字符串。
+    
+    返回值:
+    - 返回一个列表，包含指定知识库目录下所有文件的路径（相对路径）。
+    """
     doc_path = get_doc_path(kb_name)
     result = []
 
     def is_skiped_path(path: str):
+        """
+        判断给定路径是否应该被跳过。
+        
+        参数:
+        - path: 路径字符串。
+        
+        返回值:
+        - 如果路径应该被跳过，则返回True；否则返回False。
+        """
         tail = os.path.basename(path).lower()
         for x in ["temp", "tmp", ".", "~$"]:
             if tail.startswith(x):
@@ -62,18 +133,27 @@ def list_files_from_folder(kb_name: str):
         return False
 
     def process_entry(entry):
+        """
+        处理目录中的每个条目，将有效文件路径添加到结果列表中。
+        
+        参数:
+        - entry: 目录条目对象。
+        """
         if is_skiped_path(entry.path):
             return
 
         if entry.is_symlink():
+            # 如果是符号链接，递归处理链接目标
             target_path = os.path.realpath(entry.path)
             with os.scandir(target_path) as target_it:
                 for target_entry in target_it:
                     process_entry(target_entry)
         elif entry.is_file():
+            # 如果是文件，将其路径添加到结果列表
             file_path = (Path(os.path.relpath(entry.path, doc_path)).as_posix()) # 路径统一为 posix 格式
             result.append(file_path)
         elif entry.is_dir():
+            # 如果是目录，递归处理该目录
             with os.scandir(entry.path) as it:
                 for sub_entry in it:
                     process_entry(sub_entry)
@@ -83,7 +163,6 @@ def list_files_from_folder(kb_name: str):
             process_entry(entry)
 
     return result
-
 
 LOADER_DICT = {"UnstructuredHTMLLoader": ['.html', '.htm'],
                "MHTMLLoader": ['.mhtml'],
@@ -118,8 +197,15 @@ LOADER_DICT = {"UnstructuredHTMLLoader": ['.html', '.htm'],
 SUPPORTED_EXTS = [ext for sublist in LOADER_DICT.values() for ext in sublist]
 
 
-# patch json.dumps to disable ensure_ascii
+## patch json.dumps to disable ensure_ascii
 def _new_json_dumps(obj, **kwargs):
+    """
+    修改 json.dumps 默认行为，禁用 ensure_ascii 参数。
+    
+    :param obj: 要序列化的对象
+    :param kwargs: 其他关键字参数
+    :return: 序列化后的 JSON 字符串
+    """
     kwargs["ensure_ascii"] = False
     return _origin_json_dumps(obj, **kwargs)
 
@@ -133,6 +219,12 @@ class JSONLinesLoader(langchain.document_loaders.JSONLoader):
     行式 Json 加载器，要求文件扩展名为 .jsonl
     '''
     def __init__(self, *args, **kwargs):
+        """
+        初始化 JSONLinesLoader。
+        
+        :param args: 位置参数
+        :param kwargs: 关键字参数
+        """
         super().__init__(*args, **kwargs)
         self._json_lines = True
 
@@ -141,6 +233,12 @@ langchain.document_loaders.JSONLinesLoader = JSONLinesLoader
 
 
 def get_LoaderClass(file_extension):
+    """
+    根据文件扩展名获取对应的加载器类。
+
+    :param file_extension: 文件扩展名
+    :return: 对应的加载器类
+    """
     for LoaderClass, extensions in LOADER_DICT.items():
         if file_extension in extensions:
             return LoaderClass
@@ -167,13 +265,12 @@ def get_loader(loader_name: str, file_path: str, loader_kwargs: Dict = None):
     if loader_name == "UnstructuredFileLoader":
         loader_kwargs.setdefault("autodetect_encoding", True)
     elif loader_name == "CSVLoader":
-        if not loader_kwargs.get("encoding"):
-            # 如果未指定 encoding，自动识别文件编码类型，避免langchain loader 加载文件报编码错误
-            with open(file_path, 'rb') as struct_file:
-                encode_detect = chardet.detect(struct_file.read())
-            if encode_detect is None:
-                encode_detect = {"encoding": "utf-8"}
-            loader_kwargs["encoding"] = encode_detect["encoding"]
+        # 如果未指定 encoding，自动识别文件编码类型，避免langchain loader 加载文件报编码错误
+        with open(file_path, 'rb') as struct_file:
+            encode_detect = chardet.detect(struct_file.read())
+        if encode_detect is None:
+            encode_detect = {"encoding": "utf-8"}
+        loader_kwargs["encoding"] = encode_detect["encoding"]
 
     elif loader_name == "JSONLoader":
         loader_kwargs.setdefault("jq_schema", ".")
@@ -193,16 +290,21 @@ def make_text_splitter(
         llm_model: str = LLM_MODELS[0],
 ):
     """
-    根据参数获取特定的分词器
+    根据参数获取特定的分词器。
+    
+    :param splitter_name: 分词器名称，默认为 "SpacyTextSplitter"
+    :param chunk_size: 分词块大小，默认值由外部定义
+    :param chunk_overlap: 分词块重叠大小，默认值由外部定义
+    :param llm_model: 语言模型，默认使用第一个提供的模型
+    :return: 初始化后的分词器对象
     """
     splitter_name = splitter_name or "SpacyTextSplitter"
     try:
-        if splitter_name == "MarkdownHeaderTextSplitter":  # MarkdownHeaderTextSplitter特殊判定
+        if splitter_name == "MarkdownHeaderTextSplitter":  # 特殊处理 Markdown 标题分词器
             headers_to_split_on = text_splitter_dict[splitter_name]['headers_to_split_on']
             text_splitter = langchain.text_splitter.MarkdownHeaderTextSplitter(
                 headers_to_split_on=headers_to_split_on)
         else:
-
             try:  ## 优先使用用户自定义的text_splitter
                 text_splitter_module = importlib.import_module('text_splitter')
                 TextSplitter = getattr(text_splitter_module, splitter_name)
@@ -262,9 +364,6 @@ def make_text_splitter(
         TextSplitter = getattr(text_splitter_module, "RecursiveCharacterTextSplitter")
         text_splitter = TextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
         
-    # If you use SpacyTextSplitter you can use GPU to do split likes Issue #1287
-    # text_splitter._tokenizer.max_length = 37016792
-    # text_splitter._tokenizer.prefer_gpu()
     return text_splitter
 
 

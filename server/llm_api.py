@@ -11,6 +11,11 @@ def list_running_models(
 ) -> BaseResponse:
     '''
     从fastchat controller获取已加载模型列表及其配置项
+    参数:
+    - controller_address: Fastchat控制器的地址，如果未提供，则使用默认地址。
+    - placeholder: 该参数未使用，仅为占位参数。
+    返回值:
+    - 返回一个包含模型名称及其配置信息的BaseResponse对象。
     '''
     try:
         controller_address = controller_address or fschat_controller_address()
@@ -34,6 +39,11 @@ def list_config_models(
 ) -> BaseResponse:
     '''
     从本地获取configs中配置的模型列表
+    参数:
+    - types: 模型配置项类别列表，例如"local", "online", "worker"。
+    - placeholder: 该参数未使用，仅为占位参数。
+    返回值:
+    - 返回一个包含指定类型模型配置信息的BaseResponse对象。
     '''
     data = {}
     for type, models in list_config_llm_models().items():
@@ -48,6 +58,11 @@ def get_model_config(
 ) -> BaseResponse:
     '''
     获取LLM模型配置项（合并后的）
+    参数:
+    - model_name: 配置中的LLM模型名称。
+    - placeholder: 该参数未使用，仅为占位参数。
+    返回值:
+    - 返回一个包含指定模型配置信息的BaseResponse对象。
     '''
     config = {}
     # 删除ONLINE_MODEL配置中的敏感信息
@@ -68,6 +83,11 @@ def stop_llm_model(
     '''
     向fastchat controller请求停止某个LLM模型。
     注意：由于Fastchat的实现方式，实际上是把LLM模型所在的model_worker停掉。
+    参数:
+    - model_name: 要停止的LLM模型名称。
+    - controller_address: Fastchat控制器的地址，如果未提供，则使用默认地址。
+    返回值:
+    - 返回一个表示操作结果的BaseResponse对象。
     '''
     try:
         controller_address = controller_address or fschat_controller_address()
@@ -92,6 +112,12 @@ def change_llm_model(
 ):
     '''
     向fastchat controller请求切换LLM模型。
+    参数:
+    - model_name: 当前运行的模型名称。
+    - new_model_name: 要切换到的新模型名称。
+    - controller_address: Fastchat控制器的地址，如果未提供，则使用默认地址。
+    返回值:
+    - 返回一个表示操作结果的BaseResponse对象。
     '''
     try:
         controller_address = controller_address or fschat_controller_address()
@@ -99,7 +125,7 @@ def change_llm_model(
             r = client.post(
                 controller_address + "/release_worker",
                 json={"model_name": model_name, "new_model_name": new_model_name},
-                timeout=HTTPX_DEFAULT_TIMEOUT, # wait for new worker_model
+                timeout=HTTPX_DEFAULT_TIMEOUT, # 等待新worker_model的时间
             )
             return r.json()
     except Exception as e:
@@ -113,4 +139,9 @@ def change_llm_model(
 def list_search_engines() -> BaseResponse:
     from server.chat.search_engine_chat import SEARCH_ENGINES
 
+    '''
+    获取可用的搜索引擎列表
+    返回值:
+    - 返回一个包含可用搜索引擎信息的BaseResponse对象。
+    '''
     return BaseResponse(data=list(SEARCH_ENGINES))

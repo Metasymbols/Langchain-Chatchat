@@ -1,9 +1,9 @@
 from fastapi import Body, Request
 from sse_starlette.sse import EventSourceResponse
 from fastapi.concurrency import run_in_threadpool
-from configs import (LLM_MODELS, 
-                     VECTOR_SEARCH_TOP_K, 
-                     SCORE_THRESHOLD, 
+from configs import (LLM_MODELS,
+                     VECTOR_SEARCH_TOP_K,
+                     SCORE_THRESHOLD,
                      TEMPERATURE,
                      USE_RERANKER,
                      RERANKER_MODEL,
@@ -13,7 +13,8 @@ from server.utils import BaseResponse, get_prompt_template
 from langchain.chains import LLMChain
 from langchain.callbacks import AsyncIteratorCallbackHandler
 from typing import AsyncIterable, List, Optional
-import asyncio, json
+import asyncio
+import json
 from langchain.prompts.chat import ChatPromptTemplate
 from server.chat.utils import History
 from server.knowledge_base.kb_service.base import KBServiceFactory
@@ -21,43 +22,51 @@ from urllib.parse import urlencode
 from server.knowledge_base.kb_doc_api import search_docs
 from server.reranker.reranker import LangchainReranker
 from server.utils import embedding_device
-async def knowledge_base_chat(query: str = Body(..., description="用户输入", examples=["你好"]),
-                              knowledge_base_name: str = Body(..., description="知识库名称", examples=["samples"]),
-                              top_k: int = Body(VECTOR_SEARCH_TOP_K, description="匹配向量数"),
-                              score_threshold: float = Body(
-                                  SCORE_THRESHOLD,
-                                  description="知识库匹配相关度阈值，取值范围在0-1之间，SCORE越小，相关度越高，取到1相当于不筛选，建议设置在0.5左右",
-                                  ge=0,
-                                  le=2
-                              ),
-                              history: List[History] = Body(
-                                  [],
-                                  description="历史对话",
-                                  examples=[[
-                                      {"role": "user",
-                                       "content": "我们来玩成语接龙，我先来，生龙活虎"},
-                                      {"role": "assistant",
-                                       "content": "虎头虎脑"}]]
-                              ),
-                              stream: bool = Body(False, description="流式输出"),
-                              model_name: str = Body(LLM_MODELS[0], description="LLM 模型名称。"),
-                              temperature: float = Body(TEMPERATURE, description="LLM 采样温度", ge=0.0, le=1.0),
-                              max_tokens: Optional[int] = Body(
-                                  None,
-                                  description="限制LLM生成Token数量，默认None代表模型最大值"
-                              ),
-                              prompt_name: str = Body(
-                                  "default",
-                                  description="使用的prompt模板名称(在configs/prompt_config.py中配置)"
-                              ),
-                              request: Request = None,
-                              ):
-    kb = KBServiceFactory.get_service_by_name(knowledge_base_name)
+
+# 异步知识库聊天函数
+#
+# query: 用户输入的查询字符串
+# knowledge_base_name: 知识库名称
+# top_k: 匹配向量的数量
+# score_threshold: 知识库匹配相关度阈值，范围在0-1之间，SCORE越小，相关度越高
+# history: 历史对话记录
+# stream: 是否采用流式输出
+# model_name: LLM模型名称
+# temperature: LLM采样温度
+# max_tokens: 限制LLM生成的Token数量
+# prompt_name: 使用的prompt模板名称
+#
+# 返回值: EventSourceResponse对象，用于异步知识库聊天迭代器
+
+
+async def knowledge_base_chat(
+    query: str = Body(..., description="用户输入", examples=["你好"]),
+    knowledge_base_name: str = Body(..., description="知识库名称", examples=[
+                                    "samples"]),
+    top_k: int = Body(VECTOR_SEARCH_TOP_K, description="匹配向量数"),
+    score_threshold: float = Body(
+        SCORE_THRESHOLD, description="知识库匹配相关度阈值，取值范围在0-1之间，SCORE越小，相关度越高，取到1相当于不筛选，建议设置在0.5左右", ge=0, le=2),
+    history: List[History] = Body([], description="历史对话", examples=[
+                                  [{"role": "user", "content": "我们来玩成语接龙，我先来，生龙活虎"}, {"role": "assistant", "content": "虎头虎脑"}]]),
+    stream: bool = Body(False, description="流式输出"),
+    model_name: str = Body(LLM_MODELS[0], description="LLM 模型名称。"),
+    temperature: float = Body(
+        TEMPERATURE, description="LLM 采样温度", ge=0.0, le=1.0),
+    max_tokens: Optional[int] = Body(
+        None, description="限制LLM生成Token数量，默认None代表模型最大值"),
+    prompt_name: str = Body(
+        "default", description="使用的prompt模板名称(在configs/prompt_config.py中配置)"),
+    request: Request = None,
+):
+    kb = KBServiceFactory.get_service_by_name(
+        knowledge_base_name)  # 根据知识库名称获取服务
     if kb is None:
+        # 如果未找到知识库，返回错误响应
         return BaseResponse(code=404, msg=f"未找到知识库 {knowledge_base_name}")
 
-    history = [History.from_data(h) for h in history]
+    history = [History.from_data(h) for h in history]  # 将历史记录转换为History对象列表
 
+    # 定义一个异步知识库聊天迭代器函数
     async def knowledge_base_chat_iterator(
             query: str,
             top_k: int,
@@ -70,45 +79,47 @@ async def knowledge_base_chat(query: str = Body(..., description="用户输入",
         if isinstance(max_tokens, int) and max_tokens <= 0:
             max_tokens = None
 
+        # 初始化LLM模型
         model = get_ChatOpenAI(
             model_name=model_name,
             temperature=temperature,
             max_tokens=max_tokens,
             callbacks=[callback],
         )
+        # 在线程池中执行搜索文档操作
         docs = await run_in_threadpool(search_docs,
                                        query=query,
                                        knowledge_base_name=knowledge_base_name,
                                        top_k=top_k,
                                        score_threshold=score_threshold)
 
-        # 加入reranker
+        # 使用reranker进行重排名
         if USE_RERANKER:
             reranker_model_path = get_model_path(RERANKER_MODEL)
             reranker_model = LangchainReranker(top_n=top_k,
-                                            device=embedding_device(),
-                                            max_length=RERANKER_MAX_LENGTH,
-                                            model_name_or_path=reranker_model_path
-                                            )
-            print("-------------before rerank-----------------")
-            print(docs)
+                                               device=embedding_device(),
+                                               max_length=RERANKER_MAX_LENGTH,
+                                               model_name_or_path=reranker_model_path
+                                               )
             docs = reranker_model.compress_documents(documents=docs,
                                                      query=query)
-            print("------------after rerank------------------")
-            print(docs)
-        context = "\n".join([doc.page_content for doc in docs])
 
-        if len(docs) == 0:  # 如果没有找到相关文档，使用empty模板
-            prompt_template = get_prompt_template("knowledge_base_chat", "empty")
+        context = "\n".join([doc.page_content for doc in docs])  # 构建上下文
+
+        if len(docs) == 0:
+            prompt_template = get_prompt_template(
+                "knowledge_base_chat", "empty")
         else:
-            prompt_template = get_prompt_template("knowledge_base_chat", prompt_name)
-        input_msg = History(role="user", content=prompt_template).to_msg_template(False)
+            prompt_template = get_prompt_template(
+                "knowledge_base_chat", prompt_name)
+        input_msg = History(
+            role="user", content=prompt_template).to_msg_template(False)
         chat_prompt = ChatPromptTemplate.from_messages(
             [i.to_msg_template() for i in history] + [input_msg])
 
         chain = LLMChain(prompt=chat_prompt, llm=model)
 
-        # Begin a task that runs in the background.
+        # 启动一个在后台执行的任务
         task = asyncio.create_task(wrap_done(
             chain.acall({"context": context, "question": query}),
             callback.done),
@@ -117,18 +128,20 @@ async def knowledge_base_chat(query: str = Body(..., description="用户输入",
         source_documents = []
         for inum, doc in enumerate(docs):
             filename = doc.metadata.get("source")
-            parameters = urlencode({"knowledge_base_name": knowledge_base_name, "file_name": filename})
+            parameters = urlencode(
+                {"knowledge_base_name": knowledge_base_name, "file_name": filename})
             base_url = request.base_url
             url = f"{base_url}knowledge_base/download_doc?" + parameters
             text = f"""出处 [{inum + 1}] [{filename}]({url}) \n\n{doc.page_content}\n\n"""
             source_documents.append(text)
 
-        if len(source_documents) == 0:  # 没有找到相关文档
-            source_documents.append(f"<span style='color:red'>未找到相关文档,该回答为大模型自身能力解答！</span>")
+        if len(source_documents) == 0:
+            source_documents.append(
+                f"<span style='color:red'>未找到相关文档,该回答为大模型自身能力解答！</span>")
 
+        # 根据stream参数进行流式输出或一次性输出
         if stream:
             async for token in callback.aiter():
-                # Use server-sent-events to stream the response
                 yield json.dumps({"answer": token}, ensure_ascii=False)
             yield json.dumps({"docs": source_documents}, ensure_ascii=False)
         else:
@@ -140,4 +153,4 @@ async def knowledge_base_chat(query: str = Body(..., description="用户输入",
                              ensure_ascii=False)
         await task
 
-    return EventSourceResponse(knowledge_base_chat_iterator(query, top_k, history,model_name,prompt_name))
+    return EventSourceResponse(knowledge_base_chat_iterator(query, top_k, history, model_name, prompt_name))

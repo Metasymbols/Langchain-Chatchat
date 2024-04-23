@@ -307,15 +307,31 @@ class KBService(ABC):
         pass
 
 
+
+
 class KBServiceFactory:
+    """
+    知识库服务工厂类，用于根据不同的向量存储类型创建并返回相应的知识库服务实例。
+    """
 
     @staticmethod
     def get_service(kb_name: str,
                     vector_store_type: Union[str, SupportedVSType],
                     embed_model: str = EMBEDDING_MODEL,
                     ) -> KBService:
+        """
+        根据给定的知识库名称、向量存储类型和嵌入模型名称，获取相应的知识库服务实例。
+
+        :param kb_name: 知识库名称。
+        :param vector_store_type: 向量存储类型，可以是字符串或SupportedVSType枚举成员。
+        :param embed_model: 嵌入模型名称，默认为EMBEDDING_MODEL。
+        :return: 知识库服务实例。
+        """
+        # 将字符串类型的向量存储类型转换为枚举类型
         if isinstance(vector_store_type, str):
             vector_store_type = getattr(SupportedVSType, vector_store_type.upper())
+        
+        # 根据向量存储类型选择并返回相应的知识库服务实例
         if SupportedVSType.FAISS == vector_store_type:
             from server.knowledge_base.kb_service.faiss_kb_service import FaissKBService
             return FaissKBService(kb_name, embed_model=embed_model)
@@ -331,34 +347,51 @@ class KBServiceFactory:
         elif SupportedVSType.DEFAULT == vector_store_type:
             from server.knowledge_base.kb_service.milvus_kb_service import MilvusKBService
             return MilvusKBService(kb_name,
-                                   embed_model=embed_model)  # other milvus parameters are set in model_config.kbs_config
+                                   embed_model=embed_model)  # 其他milvus参数在model_config.kbs_config中设置
         elif SupportedVSType.ES == vector_store_type:
             from server.knowledge_base.kb_service.es_kb_service import ESKBService
             return ESKBService(kb_name, embed_model=embed_model)
         elif SupportedVSType.CHROMADB == vector_store_type:
             from server.knowledge_base.kb_service.chromadb_kb_service import ChromaKBService
             return ChromaKBService(kb_name, embed_model=embed_model)
-        elif SupportedVSType.DEFAULT == vector_store_type:  # kb_exists of default kbservice is False, to make validation easier.
+        elif SupportedVSType.DEFAULT == vector_store_type:  # 默认知识库服务的kb_exists为False，以便于验证。
             from server.knowledge_base.kb_service.default_kb_service import DefaultKBService
             return DefaultKBService(kb_name)
 
     @staticmethod
     def get_service_by_name(kb_name: str) -> KBService:
+        """
+        根据知识库名称从数据库加载知识库配置，并获取相应的知识库服务实例。
+
+        :param kb_name: 知识库名称。
+        :return: 知识库服务实例，如果知识库不存在则返回None。
+        """
         _, vs_type, embed_model = load_kb_from_db(kb_name)
-        if _ is None:  # kb not in db, just return None
+        if _ is None:  # 知识库不在数据库中，返回None
             return None
         return KBServiceFactory.get_service(kb_name, vs_type, embed_model)
 
     @staticmethod
     def get_default():
+        """
+        获取默认知识库服务实例。
+
+        :return: 默认知识库服务实例。
+        """
         return KBServiceFactory.get_service("default", SupportedVSType.DEFAULT)
 
 
 def get_kb_details() -> List[Dict]:
-    kbs_in_folder = list_kbs_from_folder()
-    kbs_in_db = KBService.list_kbs()
+    """
+    获取知识库的详细信息列表，包括文件夹中的知识库和数据库中的知识库。
+
+    :return: 知识库详细信息的列表，每个元素是包含知识库各种信息的字典。
+    """
+    kbs_in_folder = list_kbs_from_folder()  # 从文件夹中获取知识库列表
+    kbs_in_db = KBService.list_kbs()  # 从数据库中获取知识库列表
     result = {}
 
+    # 为文件夹中的每个知识库生成基本信息
     for kb in kbs_in_folder:
         result[kb] = {
             "kb_name": kb,
@@ -371,6 +404,7 @@ def get_kb_details() -> List[Dict]:
             "in_db": False,
         }
 
+    # 为数据库中的每个知识库更新或添加信息
     for kb in kbs_in_db:
         kb_detail = get_kb_detail(kb)
         if kb_detail:
@@ -381,6 +415,7 @@ def get_kb_details() -> List[Dict]:
                 kb_detail["in_folder"] = False
                 result[kb] = kb_detail
 
+    # 整理并返回所有知识库的信息
     data = []
     for i, v in enumerate(result.values()):
         v['No'] = i + 1
@@ -390,14 +425,21 @@ def get_kb_details() -> List[Dict]:
 
 
 def get_kb_file_details(kb_name: str) -> List[Dict]:
+    """
+    根据知识库名称获取该知识库文件的详细信息列表。
+
+    :param kb_name: 知识库名称。
+    :return: 知识库文件详细信息的列表，每个元素是包含文件各种信息的字典。
+    """
     kb = KBServiceFactory.get_service_by_name(kb_name)
     if kb is None:
         return []
 
-    files_in_folder = list_files_from_folder(kb_name)
-    files_in_db = kb.list_files()
+    files_in_folder = list_files_from_folder(kb_name)  # 从文件夹中获取知识库文件列表
+    files_in_db = kb.list_files()  # 从知识库服务中获取知识库文件列表
     result = {}
 
+    # 为文件夹中的每个文件生成基本信息
     for doc in files_in_folder:
         result[doc] = {
             "kb_name": kb_name,
@@ -411,7 +453,9 @@ def get_kb_file_details(kb_name: str) -> List[Dict]:
             "in_folder": True,
             "in_db": False,
         }
-    lower_names = {x.lower(): x for x in result}
+    
+    # 为数据库中的每个文件更新或添加信息
+    lower_names = {x.lower(): x for x in result}  # 用于处理文件名大小写不一致的情况
     for doc in files_in_db:
         doc_detail = get_file_detail(kb_name, doc)
         if doc_detail:
@@ -422,6 +466,7 @@ def get_kb_file_details(kb_name: str) -> List[Dict]:
                 doc_detail["in_folder"] = False
                 result[doc] = doc_detail
 
+    # 整理并返回所有文件的信息
     data = []
     for i, v in enumerate(result.values()):
         v['No'] = i + 1
@@ -431,14 +476,35 @@ def get_kb_file_details(kb_name: str) -> List[Dict]:
 
 
 class EmbeddingsFunAdapter(Embeddings):
+    """
+    嵌入向量功能适配器类，提供统一的嵌入文档和查询的接口。
+    """
+
     def __init__(self, embed_model: str = EMBEDDING_MODEL):
+        """
+        初始化嵌入向量功能适配器。
+
+        :param embed_model: 嵌入模型名称，默认为EMBEDDING_MODEL。
+        """
         self.embed_model = embed_model
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        """
+        将文档列表嵌入为向量列表。
+
+        :param texts: 文档字符串列表。
+        :return: 文档嵌入向量列表，每个文档的嵌入向量为浮点数列表。
+        """
         embeddings = embed_texts(texts=texts, embed_model=self.embed_model, to_query=False).data
         return normalize(embeddings).tolist()
 
     def embed_query(self, text: str) -> List[float]:
+        """
+        将查询字符串嵌入为向量。
+
+        :param text: 查询字符串。
+        :return: 查询嵌入向量，为浮点数列表。
+        """
         embeddings = embed_texts(texts=[text], embed_model=self.embed_model, to_query=True).data
         query_embed = embeddings[0]
         query_embed_2d = np.reshape(query_embed, (1, -1))  # 将一维数组转换为二维数组
@@ -446,18 +512,38 @@ class EmbeddingsFunAdapter(Embeddings):
         return normalized_query_embed[0].tolist()  # 将结果转换为一维数组并返回
 
     async def aembed_documents(self, texts: List[str]) -> List[List[float]]:
+        """
+        异步嵌入文档列表为向量列表。
+
+        :param texts: 文档字符串列表。
+        :return: 文档嵌入向量列表，每个文档的嵌入向量为浮点数列表。
+        """
         embeddings = (await aembed_texts(texts=texts, embed_model=self.embed_model, to_query=False)).data
         return normalize(embeddings).tolist()
 
     async def aembed_query(self, text: str) -> List[float]:
+        """
+        异步嵌入查询字符串为向量。
+
+        :param text: 查询字符串。
+        :return: 查询嵌入向量，为浮点数列表。
+        """
         embeddings = (await aembed_texts(texts=[text], embed_model=self.embed_model, to_query=True)).data
         query_embed = embeddings[0]
         query_embed_2d = np.reshape(query_embed, (1, -1))  # 将一维数组转换为二维数组
         normalized_query_embed = normalize(query_embed_2d)
         return normalized_query_embed[0].tolist()  # 将结果转换为一维数组并返回
 
-
 def score_threshold_process(score_threshold, k, docs):
+    """
+    根据给定的分数阈值和数量k，从文档列表中筛选出分数满足条件的前k个文档。
+
+    :param score_threshold: 分数阈值，文档相似度需大于等于此阈值才会被包含。
+    :param k: 需要返回的文档数量。
+    :param docs: 包含文档和相似度分数的列表。
+    :return: 筛选后的文档列表，包含前k个满足条件的文档。
+    """
+    # 如果设置了分数阈值，则筛选出相似度大于等于阈值的文档
     if score_threshold is not None:
         cmp = (
             operator.le
